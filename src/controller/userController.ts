@@ -5,7 +5,7 @@ import { Request, Response } from 'express';
 
 const getAllUsers = catchAsync(
   async (req: Request, res: Response, next: any) => {
-    const users = await User.find();
+    const users = await User.find().select('-password');
 
     res.status(200).json({
       status: 'success',

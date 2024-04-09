@@ -2,7 +2,7 @@ import { promisify } from 'util';
 import User from '../models/userModel';
 import AppError from '../utils/appError';
 import catchAsync from '../utils/catchAsync';
-import { Request, Response } from 'express';
+import { NextFunction, Request, Response } from 'express';
 import jwt, { JwtPayload } from 'jsonwebtoken';
 
 const signToken = (id: any) => {
@@ -12,13 +12,14 @@ const signToken = (id: any) => {
 };
 
 const signup = catchAsync(async (req: Request, res: Response, next: any) => {
-  const { name, email, password, passwordConfirm } = req.body;
+  const { name, email, password, passwordConfirm, role } = req.body;
 
   const user = await User.create({
     name,
     email,
     password,
     passwordConfirm,
+    role,
   });
 
   const token = signToken(user._id);
@@ -80,7 +81,7 @@ const protect = catchAsync(async (req: Request, res: Response, next: any) => {
   ) as JwtPayload;
 
   //   check user is still exists
-  const currentUser = await User.findById(decoded.id);
+  const currentUser: any = await User.findById(decoded.id);
 
   if (!currentUser) {
     return next(
@@ -89,8 +90,44 @@ const protect = catchAsync(async (req: Request, res: Response, next: any) => {
   }
 
   //   check if user changed password after the token was issued
+  if (currentUser.changesPasswordAfter(decoded.iat)) {
+    return next(
+      new AppError('User recently changed password! Please login again', 401)
+    );
+  }
+
+  // grant access to protected route
+  (req as any).user = currentUser;
 
   next();
 });
 
-export { signup, login, protect };
+const restricTo = (...roles: string[]) => {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!roles.includes((req as any).user.role)) {
+      return next(
+        new AppError('You do not have premission to performe this action', 403)
+      );
+    }
+
+    next();
+  };
+};
+
+const forgotPassword = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    /* Get user based on POSTED email */
+    const user = await User.findOne({ email: req.body.email });
+    if (!user) {
+      return next(
+        new AppError('There is no user with this email address', 404)
+      );
+    }
+
+    /*Generate the random reset token */
+    const resetToken = user.createPasswordResetToken();
+    await user.save({ validateBeforeSave: false });
+  }
+);
+
+export { signup, login, protect, restricTo, forgotPassword };
